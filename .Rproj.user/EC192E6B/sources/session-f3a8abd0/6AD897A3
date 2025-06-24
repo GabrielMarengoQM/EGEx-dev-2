@@ -1,0 +1,26 @@
+{
+    "id": "6AD897A3",
+    "path": "~/Desktop/Shiny-apps/EGEX-june/modules/query_module.R",
+    "project_path": "modules/query_module.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1750628073079.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "213,7",
+        "scrollLine": "203"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1750765993,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1750765993189,
+    "read_only": false,
+    "read_only_alternatives": []
+}
