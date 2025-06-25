@@ -316,6 +316,14 @@ queryModuleServer <- function(id, con, individual_tables, saved_gene_lists, filt
       })
     })
     
+    lapply(individual_tables, function(tbl) {
+      shiny::outputOptions(
+        output,
+        paste0("filters_", tbl),
+        suspendWhenHidden = FALSE
+      )
+    })
+    
     ##### ========================= Add Choices to Non-Numeric Filters ========================= #####
     observe({
       for(tbl in individual_tables) {

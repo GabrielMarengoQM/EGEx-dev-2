@@ -1,3 +1,5 @@
+# app.R
+
 ##### ========================= Libraries ========================= #####
 library(shiny)
 library(bslib)
@@ -15,12 +17,14 @@ library(shinycssloaders)
 library(tidyr)
 library(openxlsx)
 
-options(shiny.host = "0.0.0.0")
-options(shiny.port = 8180)
+# options(shiny.host = "0.0.0.0")
+# options(shiny.port = 8180)
 
 # Source Modules
+source("./modules/home_module.R")
 source("./modules/query_module.R")
 query <- "query_mod"
+home <- "home_mod"
 # source("./modules/goORA_module.R")
 # goORA <- "goORA"
 # source("./modules/reactomeORA_module.R")
@@ -71,12 +75,20 @@ ui <- page_navbar(
   title = "EGEx",
   padding = "0.4rem",
   theme = bs_theme(bootswatch = "cosmo"),
+  navbar_options = navbar_options(
+    bg    = "#063970",  # bootstrap class bg-primary
+    theme = "dark"      # makes text/icons light
+  ),
   ##### ========================= Custom CSS ========================= #####
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "styles.css")
   ),
   ##### ========================= Explore Data Page ========================= #####
-  nav_panel("Query Database",
+  nav_panel("Home",
+            homeModuleUI(home)
+  ),
+  ##### ========================= Explore Data Page ========================= #####
+  nav_panel("Query",
             queryModuleUI(query, individual_tables, filter_metadata, class_table_map)
   )
   
@@ -88,8 +100,10 @@ ui <- page_navbar(
 server <- function(input, output, session) {
   # Initialize per-session saved gene list
   saved_gene_lists <- reactiveValues(data = list())
+
   # Call module server functions
   queryModuleServer(query,  con, individual_tables, saved_gene_lists, filter_metadata, class_table_map)
+  homeModuleServer(home)
 }
 
 shinyApp(ui, server)
