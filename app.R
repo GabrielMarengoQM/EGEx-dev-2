@@ -23,17 +23,10 @@ library(openxlsx)
 # Source Modules
 source("./modules/home_module.R")
 source("./modules/query_module.R")
+source("./modules/download_module.R")
 query <- "query_mod"
 home <- "home_mod"
-# source("./modules/goORA_module.R")
-# goORA <- "goORA"
-# source("./modules/reactomeORA_module.R")
-# reactomeORA <- "reactomeORA"
-# source("./modules/oddsRatio_module.R")
-# oddsRatio <- "oddsRatio"
-# source("./modules/downloads_module.R")
-# downloads <- "downloads"
-
+download <- "download"
 
 ##### ========================= duckDB connect and access Tables ========================= #####
 con <- dbConnect(duckdb(), "EGEx-db.duckdb")
@@ -83,13 +76,17 @@ ui <- page_navbar(
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "styles.css")
   ),
-  ##### ========================= Explore Data Page ========================= #####
+  ##### ========================= Home Page ========================= #####
   nav_panel("Home",
             homeModuleUI(home)
   ),
-  ##### ========================= Explore Data Page ========================= #####
+  ##### ========================= Query Page ========================= #####
   nav_panel("Query",
             queryModuleUI(query, individual_tables, filter_metadata, class_table_map)
+  ),
+  ##### ========================= Download Page ========================= #####
+  nav_panel("Download",
+            downloadModuleUI(download)
   )
   
 )
@@ -104,6 +101,7 @@ server <- function(input, output, session) {
   # Call module server functions
   queryModuleServer(query,  con, individual_tables, saved_gene_lists, filter_metadata, class_table_map)
   homeModuleServer(home)
+  downloadModuleServer(download, con)
 }
 
 shinyApp(ui, server)
