@@ -13,8 +13,22 @@ queryModuleUI <- function(id, individual_tables, filter_metadata, class_table_ma
             class = "overflow-auto",
             style = "max-height: 85vh;",
             
-            # SAVED GENE LISTS UI
             accordion(
+              # Info
+              accordion_panel(
+                span(
+                  tagList(icon("info-square"), "Information"),
+                  tooltip(
+                    bs_icon("info-circle"),
+                    "Information about this page.",
+                    placement = "right"
+                  )
+                ),
+                uiOutput(ns("query_page_info")),
+                value = "info"
+              ),
+              
+              # SAVED GENE LISTS UI
               accordion_panel(
                 span(
                   tagList(icon("list"), "Save Gene List"),
@@ -92,7 +106,7 @@ queryModuleUI <- function(id, individual_tables, filter_metadata, class_table_ma
                 value = "input_list"
               ),
               
-              open = "controls"
+              open = "info"
             )
           )
         )
@@ -261,13 +275,19 @@ queryModuleServer <- function(id, con, individual_tables, saved_gene_lists, filt
           if (is.numeric(sample_val)) {
             vals <- dbGetQuery(con, sprintf("SELECT %s FROM %s WHERE %s IS NOT NULL", col, tbl, col))[[col]]
             tagList(
-              bslib::tooltip(sliderInput(
-                session$ns(input_id), label = nice_col_name,
+              sliderInput(
+                session$ns(input_id), 
+                label = tooltip(
+                  trigger = list(
+                    nice_col_name,
+                    bs_icon("info-circle")
+                  ),
+                  tooltip_text
+                ),
                 min = min(vals, na.rm = TRUE),
                 max = max(vals, na.rm = TRUE),
                 value = range(vals, na.rm = TRUE)
-              ), tooltip_text,
-              placement = "right"),
+              ),
               switchInput(session$ns(na_id), value = TRUE, onLabel = "include", offLabel = "exclude", size = "mini")
             )
           } else {
@@ -282,7 +302,8 @@ queryModuleServer <- function(id, con, individual_tables, saved_gene_lists, filt
                   tooltip_text
                 ),
                 choices = c("All", "Has no data"),
-                selected = "All", multiple = TRUE,
+                selected = character(0), multiple = TRUE,
+                # selected = "All", multiple = TRUE,
                 options = list(
                   placeholder = paste("e.g.", sample_val)
                 )
@@ -479,6 +500,11 @@ queryModuleServer <- function(id, con, individual_tables, saved_gene_lists, filt
     
     ##### ========================= "Input custom list" (UI) ========================= #####
     observeEvent(input$list_input, {
+      
+      # Make named vector of table choices (nice name = label, table = value)
+      table_meta <- filter_metadata[!duplicated(filter_metadata$table), c("table", "table_nice_name")]
+      table_choices <- setNames(table_meta$table, table_meta$table_nice_name)
+      
       showModal(modalDialog(
         title = "Filter custom list (genes, phenotypes etc)",
         fluidPage(
@@ -486,7 +512,8 @@ queryModuleServer <- function(id, con, individual_tables, saved_gene_lists, filt
           fluidRow(
             column(6,
                    selectInput(session$ns("list_input_table"), "Table:",
-                               choices = individual_tables, selected = individual_tables[1])
+                               choices = table_choices,
+                               selected = names(table_choices)[1])
             ),
             column(6,
                    uiOutput(session$ns("list_input_column_ui"))
@@ -525,31 +552,52 @@ queryModuleServer <- function(id, con, individual_tables, saved_gene_lists, filt
       ))
     })
     
-    ##### ========================= "Input custom list": Update Column Choices based on Table selected ========================= #####
+    
+    ##### ========================= Update Column Choices based on Table selected ========================= #####
     output$list_input_column_ui <- renderUI({
       req(input$list_input_table)
       tbl <- input$list_input_table
-      cols <- setdiff(dbListFields(con, tbl), "GeneID")
-      selectInput(session$ns("list_input_column"), "Select Column:", choices = cols, selected = cols[1])
+      
+      # Filter metadata for the selected table
+      col_meta <- filter_metadata[filter_metadata$table == tbl, ]
+      
+      # Create named vector: column backend ID -> nice name
+      col_choices <- setNames(col_meta$column, col_meta$column_nice_name)
+      
+      selectInput(session$ns("list_input_column"), "Select Column:", choices = col_choices, selected = names(col_choices)[1])
     })
     
-    ##### ========================= "Input custom list" (Server) ========================= #####
+    
+    ##### ========================= Handle Application of List Input ========================= #####
     observeEvent(input$apply_list_input, {
       req(input$list_input_table, input$list_input_column, input$list_input_text, input$list_input_separator)
+      
       tbl <- input$list_input_table
       col <- input$list_input_column
+      
       filter_input_id <- paste(tbl, col, sep = "_")
+      
       entries <- unlist(strsplit(input$list_input_text, split = input$list_input_separator, fixed = TRUE))
       entries <- trimws(entries)
       entries <- entries[entries != ""]
+      
+      # Get available distinct values
       available_values <- as.character(dbGetQuery(con, sprintf("SELECT DISTINCT %s FROM %s", col, tbl))[[col]])
       available_values <- available_values[!is.na(available_values)]
+      
+      # Match input entries to available values
       valid_entries <- entries[entries %in% available_values]
       invalid_entries <- setdiff(entries, valid_entries)
+      
+      # Update the related selectize input
       updateSelectizeInput(session, filter_input_id,
                            choices = c("All", "Has no data", available_values),
                            selected = valid_entries)
+      
+      # Clear the text input
       updateTextInput(session, "list_input_text", value = "")
+      
+      # Build feedback message
       message_parts <- c()
       if (length(valid_entries) > 0) {
         message_parts <- c(message_parts, paste("Matched terms:", paste(valid_entries, collapse = ", ")))
@@ -558,114 +606,125 @@ queryModuleServer <- function(id, con, individual_tables, saved_gene_lists, filt
         message_parts <- c(message_parts, paste("The following entries did not match any available terms:",
                                                 paste(invalid_entries, collapse = ", ")))
       }
+      
       output$list_input_message <- renderUI({
         HTML(paste(message_parts, collapse = "<br>"))
       })
     })
     
-    ##### ========================= View Filters Dynamically ========================= #####
-    output$active_filters <- renderUI({
-      all_inputs <- reactiveValuesToList(input)
-      
-      filter_keys <- names(all_inputs)[sapply(names(all_inputs), function(x) {
-        any(sapply(individual_tables, function(tbl) startsWith(x, paste0(tbl, "_"))))
-      })]
-      
-      filters <- all_inputs[filter_keys]
-      
-      # Filter only non-empty values
-      filters <- Filter(function(x) {
-        if (is.null(x)) return(FALSE)
-        if (is.character(x) || is.numeric(x)) return(length(x) > 0 && !all(x == "")) 
-        return(TRUE)
-      }, filters)
-      
-      if (length(filters) == 0) {
-        return(NULL)
-      }
-      
-      # === Group filters by table ===
-      table_map <- list()
-      
-      for (key in names(filters)) {
-        tbl <- NULL
-        col <- NULL
-        
-        # Find longest matching table name prefix
-        for (candidate_tbl in individual_tables[order(nchar(individual_tables), decreasing = TRUE)]) {
-          prefix <- paste0(candidate_tbl, "_")
-          if (startsWith(key, prefix)) {
-            tbl <- candidate_tbl
-            col <- sub(prefix, "", key)
-            break
-          }
-        }
-        
-        if (is.null(tbl) || is.null(col)) return(NULL)  # skip if can't parse
-        val <- filters[[key]]
-        
-        # Check if it's a 'na' switch
-        is_na_filter <- grepl("_na$", key)
-        col_clean <- sub("_na$", "", col)
-        
-        # Get nice names from metadata
-        nice_tbl <- filter_metadata$table_nice_name[filter_metadata$table == tbl & filter_metadata$column == col_clean]
-        if (length(nice_tbl) == 0 || is.na(nice_tbl)) nice_tbl <- tbl
-        
-        nice_col <- filter_metadata$column_nice_name[filter_metadata$table == tbl & filter_metadata$column == col_clean]
-        if (length(nice_col) == 0 || is.na(nice_col)) nice_col <- col_clean
-        
-        # Skip NA filters unless they are explicitly set to FALSE (i.e. excluding missing data)
-        if (is_na_filter && isTRUE(filters[[key]])) next
-        
-        label <- if (is_na_filter && !isTRUE(filters[[key]])) {
-          paste(nice_col, "(Include Missing Data)")
-        } else {
-          nice_col
-        }
-        
-        value_str <- if (is.logical(val)) {
-          if (val) "Yes" else "No"
-        } else if (is.vector(val) && length(val) > 1) {
-          paste(val, collapse = ", ")
-        } else {
-          val
-        }
-        
-        if (!nice_tbl %in% names(table_map)) table_map[[nice_tbl]] <- list()
-        
-        table_map[[nice_tbl]][[label]] <- value_str
-      }
-      
-      # === Render grouped filters ===
-      outer_ui <- lapply(names(table_map), function(tbl_nice_name) {
-        filters_in_tbl <- table_map[[tbl_nice_name]]
-        
-        rows <- mapply(function(k, v) {
-          tags$tr(
-            tags$td(style = "padding: 4px; vertical-align: top;", tags$strong(k)),
-            tags$td(style = "padding: 4px;", v)
-          )
-        }, names(filters_in_tbl), filters_in_tbl, SIMPLIFY = FALSE)
-        
-        tagList(
-          tags$h5(tbl_nice_name),
-          tags$table(
-            style = "width: 100%; border-collapse: collapse;",
-            rows
-          ),
-          tags$br()
-        )
-      })
-      
-      tagList(
-        tags$div(
-          style = "padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; margin-bottom: 10px; border-radius: 6px;",
-          tags$h5("Active Filters"),
-          outer_ui
-        )
-      )
-    })
+    # ##### ========================= View Filters Dynamically ========================= #####
+    # output$active_filters <- renderUI({
+    #   all_inputs <- reactiveValuesToList(input)
+    #   
+    #   filter_keys <- names(all_inputs)[sapply(names(all_inputs), function(x) {
+    #     any(sapply(individual_tables, function(tbl) startsWith(x, paste0(tbl, "_"))))
+    #   })]
+    #   
+    #   filters <- all_inputs[filter_keys]
+    #   
+    #   # Filter only non-empty values
+    #   filters <- Filter(function(x) {
+    #     if (is.null(x)) return(FALSE)
+    #     if (is.character(x) || is.numeric(x)) return(length(x) > 0 && !all(x == "")) 
+    #     return(TRUE)
+    #   }, filters)
+    #   
+    #   if (length(filters) == 0) {
+    #     return(NULL)
+    #   }
+    #   
+    #   # === Group filters by table ===
+    #   table_map <- list()
+    #   
+    #   for (key in names(filters)) {
+    #     tbl <- NULL
+    #     col <- NULL
+    #     
+    #     # Find longest matching table name prefix
+    #     for (candidate_tbl in individual_tables[order(nchar(individual_tables), decreasing = TRUE)]) {
+    #       prefix <- paste0(candidate_tbl, "_")
+    #       if (startsWith(key, prefix)) {
+    #         tbl <- candidate_tbl
+    #         col <- sub(prefix, "", key)
+    #         break
+    #       }
+    #     }
+    #     
+    #     if (is.null(tbl) || is.null(col)) return(NULL)  # skip if can't parse
+    #     val <- filters[[key]]
+    #     
+    #     # Check if it's a 'na' switch
+    #     is_na_filter <- grepl("_na$", key)
+    #     col_clean <- sub("_na$", "", col)
+    #     
+    #     # Get nice names from metadata
+    #     nice_tbl <- filter_metadata$table_nice_name[filter_metadata$table == tbl & filter_metadata$column == col_clean]
+    #     if (length(nice_tbl) == 0 || is.na(nice_tbl)) nice_tbl <- tbl
+    #     
+    #     nice_col <- filter_metadata$column_nice_name[filter_metadata$table == tbl & filter_metadata$column == col_clean]
+    #     if (length(nice_col) == 0 || is.na(nice_col)) nice_col <- col_clean
+    #     
+    #     # Skip NA filters unless they are explicitly set to FALSE (i.e. excluding missing data)
+    #     if (is_na_filter && isTRUE(filters[[key]])) next
+    #     
+    #     label <- if (is_na_filter && !isTRUE(filters[[key]])) {
+    #       paste(nice_col, "(Include Missing Data)")
+    #     } else {
+    #       nice_col
+    #     }
+    #     
+    #     value_str <- if (is.logical(val)) {
+    #       if (val) "Yes" else "No"
+    #     } else if (is.vector(val) && length(val) > 1) {
+    #       paste(val, collapse = ", ")
+    #     } else {
+    #       val
+    #     }
+    #     
+    #     if (!nice_tbl %in% names(table_map)) table_map[[nice_tbl]] <- list()
+    #     
+    #     table_map[[nice_tbl]][[label]] <- value_str
+    #   }
+    #   
+    #   # === Render grouped filters ===
+    #   outer_ui <- lapply(names(table_map), function(tbl_nice_name) {
+    #     filters_in_tbl <- table_map[[tbl_nice_name]]
+    #     
+    #     rows <- mapply(function(k, v) {
+    #       tags$tr(
+    #         tags$td(style = "padding: 4px; vertical-align: top;", tags$strong(k)),
+    #         tags$td(style = "padding: 4px;", v)
+    #       )
+    #     }, names(filters_in_tbl), filters_in_tbl, SIMPLIFY = FALSE)
+    #     
+    #     tagList(
+    #       tags$h5(tbl_nice_name),
+    #       tags$table(
+    #         style = "width: 100%; border-collapse: collapse;",
+    #         rows
+    #       ),
+    #       tags$br()
+    #     )
+    #   })
+    #   
+    #   tagList(
+    #     tags$div(
+    #       style = "padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; margin-bottom: 10px; border-radius: 6px;",
+    #       tags$h5("Active Filters"),
+    #       outer_ui
+    #     )
+    #   )
+    # })
     
+    output$query_page_info <- renderUI({
+      tagList(
+        tags$h4("Query Page Information"),
+        tags$p("• 'Save Gene List' Save your resulting gene list."),
+        tags$p("• 'Filters' Combine multiple filters to intersect datasets."),
+        tags$p("• 'Input Custom list' Allows for any list of values to be uploaded e.g. gene or phenotype list."),
+        tags$p("• 'Matching Genes' Displays all genes resulting from the user query."),
+        tags$p("• Hover over info icons for descriptions of each filter.")
+      )
+    })    
   })
 }

@@ -42,6 +42,23 @@ filter_metadata <- dbReadTable(con, "db_metadata")
 class_table_map <- split(filter_metadata$table, filter_metadata$class)
 # Remove duplicated tables within each class
 class_table_map <- lapply(class_table_map, unique)
+desired_order <- c(
+  "Human Phenotypes",
+  "Mouse Assays",
+  "Gene Identifiers",
+  "Gene Group",
+  "Alias & Previous Gene Symbols",
+  "Genomic Sequence Info",
+  "Gene Constraint Metrics",
+  "Expression",
+  "FUSIL",
+  "Human Cellular Assays",
+  "Protein Classification",
+  "Protein-Protein Interactions",
+  "Functional Annotations",
+  "Comparitive Genomics"
+)
+class_table_map <- class_table_map[desired_order]
 
 ##### ========================= User saved gene lists ========================= #####
 # saved_gene_lists <- reactiveValues(data = list())
@@ -59,7 +76,7 @@ ui <- page_navbar(
     tags$link(rel = "stylesheet", type = "text/css", href = "styles.css")
   ),
   ##### ========================= Explore Data Page ========================= #####
-  nav_panel("Explore Data",
+  nav_panel("Query Database",
             queryModuleUI(query, individual_tables, filter_metadata, class_table_map)
   )
   
